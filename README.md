@@ -49,11 +49,18 @@ While the session is in a linked worktree, or has made some, the line under the 
 ## How it finds the worktrees
 
 - **The session's own:** a session started with `claude --worktree`, and every `EnterWorktree` call.
-- **Subagents':** the worktree path an isolated Agent call reports, and the working directory of each subagent's first tool call (which covers background subagents too).
+- **Subagents':** the worktree path an isolated subagent reports when it finishes. Worktrees of subagents still running in the background aren't in the session's list yet, but `/trees` shows them under the repository's other worktrees, and `/tree-open <name>` opens them.
 - **Shell:** any Bash `git worktree add`; the repository's worktrees are compared before and after the call.
 - **`/tree-pr`:** the PR checkouts it creates.
 
 Worktrees that have since been removed drop off the list. The list is kept per session, so it survives `--resume`.
+
+## What it touches
+
+- **Tool calls:** only `Bash`, `EnterWorktree`, `ExitWorktree` and `Agent`; no other tool call reaches the plugin. It passes each through unchanged and never blocks one. It reads the Bash command's text (only to spot `git worktree add`) and the `worktreePath` in the other tools' results, nothing else: no file contents, edits or command output.
+- **Programs it runs:** `git`, `/usr/bin/open` (to launch the IDE), and `gh pr view` for PR titles when `gh` is installed.
+- **Network:** none of its own; `/tree-pr` runs `git fetch`.
+- **What it stores:** worktree paths, branch names, subagent task descriptions and PR titles, in Claude Code's local storage for the plugin.
 
 ## Settings
 

@@ -27,12 +27,9 @@ type $ = EngineInterface
 const trees = atom({ plugin: 'easytree', key: 'trees' } as const, [], { shape: 'trees-1' })
 
 const TOOL = 'open_in_ide'
-const TOOL_ID = 'mcp__easytree__open_in_ide'
 const PR_DIR = '.claude/worktrees'
 const MAX_STORED_SESSIONS = 50
 
-/** Subagents whose working directory has been looked at, so it is checked once each. */
-const seenAgents = new Set<string>()
 let statusTimer: { cancel: () => void } | undefined
 
 /** The person's settings, set as the module registers (each reload included). */
@@ -92,37 +89,44 @@ export const register: Register = (on, options) => {
     return started
   })
 
-  on('tool.call', async ($, e, next) => {
-    if (String(e.tool) === TOOL_ID) return next(e)
+  // Only the four tools that make or move between worktrees are hooked; every
+  // other tool call never reaches this plugin. Each hook passes its call on
+  // unchanged and only reads where the worktree is.
 
-    // A Bash `git worktree add`: diff the repo's worktrees around the call.
-    if (e.tool === 'Bash' && addsWorktree(e.command)) {
-      const cwd = await $.session.cwd()
-      const before = await safe($, () => listWorktrees($, cwd))
-      const ran = await next(e)
-      await safe($, async () => {
-        const after = await listWorktrees($, cwd)
-        const known = new Set((before ?? []).map(w => w.path))
-        const label = e.agentId ? await agentLabel($, e.agentId) : undefined
-        for (const wt of after) if (!known.has(wt.path)) await track($, wt.path, 'bash', label)
-      })
-      return ran
-    }
-
+  // A Bash `git worktree add`: diff the repo's worktrees around the call.
+  on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
+    if (!addsWorktree(e.command)) return next(e)
+    const cwd = await $.session.cwd()
+    const before = await safe($, () => listWorktrees($, cwd))
     const ran = await next(e)
     await safe($, async () => {
-      // A subagent's tools run in its own directory: a worktree when isolated.
-      if (e.agentId && !seenAgents.has(e.agentId)) {
-        seenAgents.add(e.agentId)
-        await track($, await $.session.cwd(), 'agent', await agentLabel($, e.agentId))
-      }
-      if (ran.deny !== undefined || ran.isError) return
-      const result = ran.result as { worktreePath?: unknown } | undefined
-      const path = typeof result?.worktreePath === 'string' ? result.worktreePath : undefined
-      if (e.tool === 'EnterWorktree' && path) await track($, path, 'enter')
-      if (e.tool === 'Agent' && path) await track($, path, 'agent', e.description)
-      if (e.tool === 'EnterWorktree' || e.tool === 'ExitWorktree') scheduleStatus($)
+      const after = await listWorktrees($, cwd)
+      const known = new Set((before ?? []).map(w => w.path))
+      const label = e.agentId ? await agentLabel($, e.agentId) : undefined
+      for (const wt of after) if (!known.has(wt.path)) await track($, wt.path, 'bash', label)
     })
+    return ran
+  }).catch(($, e, next) => next(e))
+
+  on('tool.call', { tool: 'EnterWorktree' }, async ($, e, next) => {
+    const ran = await next(e)
+    const path = worktreePathOf(ran)
+    if (path) await safe($, () => track($, path, 'enter'))
+    scheduleStatus($)
+    return ran
+  }).catch(($, e, next) => next(e))
+
+  on('tool.call', { tool: 'ExitWorktree' }, async ($, e, next) => {
+    const ran = await next(e)
+    scheduleStatus($)
+    return ran
+  }).catch(($, e, next) => next(e))
+
+  // An isolated subagent that ran in the foreground reports its worktree.
+  on('tool.call', { tool: 'Agent' }, async ($, e, next) => {
+    const ran = await next(e)
+    const path = worktreePathOf(ran)
+    if (path) await safe($, () => track($, path, 'agent', e.description))
     return ran
   }).catch(($, e, next) => next(e))
 
@@ -424,6 +428,13 @@ async function openIn($: $, ide: Ide, path: string): Promise<string> {
 async function agentLabel($: $, agentId: string): Promise<string | undefined> {
   const agents = await $.agent.list().catch(() => [])
   return agents.find(a => a.id === agentId)?.description
+}
+
+/** The `worktreePath` an EnterWorktree or Agent result carries, when the call succeeded. */
+function worktreePathOf(ran: { deny?: string; isError?: true; result?: unknown }): string | undefined {
+  if (ran.deny !== undefined || ran.isError) return undefined
+  const path = (ran.result as { worktreePath?: unknown } | undefined)?.worktreePath
+  return typeof path === 'string' ? path : undefined
 }
 
 function firstLine(text: string): string {
