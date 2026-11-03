@@ -1,0 +1,17 @@
+{
+  "name": "easytree",
+  "owner": {
+    "name": "shashankks0987",
+    "url": "https://github.com/shashankks0987"
+  },
+  "metadata": {
+    "description": "easytree: open Claude Code's worktrees and PR checkouts in your IDE."
+  },
+  "plugins": [
+    {
+      "name": "easytree",
+      "source": "./",
+      "description": "Open the code Claude is changing in a git worktree, or a PR checkout, in IntelliJ IDEA or VS Code, at the same folder you launched Claude in."
+    }
+  ]
+}

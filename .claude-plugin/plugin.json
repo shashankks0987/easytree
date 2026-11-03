@@ -1,0 +1,39 @@
+{
+  "name": "easytree",
+  "version": "0.1.0",
+  "description": "Open the code Claude is changing in a git worktree, or a PR checkout, in IntelliJ IDEA or VS Code, at the same folder you launched Claude in.",
+  "author": {
+    "name": "shashankks0987",
+    "url": "https://github.com/shashankks0987"
+  },
+  "homepage": "https://github.com/shashankks0987/easytree",
+  "repository": "https://github.com/shashankks0987/easytree",
+  "keywords": [
+    "worktree",
+    "git",
+    "ide",
+    "intellij",
+    "vscode",
+    "pull-request"
+  ],
+  "license": "MIT",
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "ide": {
+      "type": "string",
+      "title": "Default IDE",
+      "description": "The IDE /tree-open and /tree-pr launch when you don't name one: idea (IntelliJ IDEA) or code (VS Code).",
+      "default": "idea",
+      "options": [
+        "idea",
+        "code"
+      ]
+    },
+    "showStatus": {
+      "type": "boolean",
+      "title": "Show worktree in status line",
+      "description": "Pin the worktree this session is in, and how many others it made, under the prompt.",
+      "default": true
+    }
+  }
+}
