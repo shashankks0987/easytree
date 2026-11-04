@@ -35,7 +35,7 @@ claude plugin install easytree --marketplace shashankks0987/easytree
 | `/tree-open … code` / `/tree-open … idea` | Overrides the default IDE for this one call (`intellij`, `vscode` work too). |
 | `/trees` | Opens a picker: type to search by name, branch or PR, ↑↓ to move, Enter to open, Esc to close. It lists this session's worktrees first (branch, changed files, where each came from), then the repository's, then subagents'. A button at the bottom switches between IntelliJ and VS Code. |
 | `/trees all` | Prints every worktree of the repository with its path. |
-| `/tree-pr 123` / `/tree-pr <PR URL>` | Fetches the pull request into branch `pr-123` and a worktree at `<repo>/.claude/worktrees/pr-123`, then opens it. Running it again brings a clean checkout up to date with the PR. |
+| `/tree-pr 123` / `/tree-pr <PR URL>` | Fetches the pull request into branch `pr-123` and a worktree beside the repository, at `<repo>-worktrees/pr-123`, then opens it. Running it again brings a clean checkout up to date with the PR. |
 
 All three run right away, even while Claude is in the middle of a turn, and none of them costs a model call.
 
@@ -58,12 +58,31 @@ While the session is in a linked worktree, or has made some, the line under the 
 
 Worktrees that have since been removed drop off the list. The list is kept per session, so it survives `--resume`.
 
-## What it touches
+## What it runs, reads and sends
 
-- **Tool calls:** only `Bash`, `EnterWorktree`, `ExitWorktree` and `Agent`; no other tool call reaches the plugin. It passes each through unchanged and never blocks one. It reads the Bash command's text (only to spot `git worktree add`) and the `worktreePath` in the other tools' results, nothing else: no file contents, edits or command output.
-- **Programs it runs:** `git`, `/usr/bin/open` (to launch the IDE), and `gh pr view` for PR titles when `gh` is installed.
-- **Network:** none of its own; `/tree-pr` runs `git fetch`.
-- **What it stores:** worktree paths, branch names, subagent task descriptions and PR titles, in Claude Code's local storage for the plugin.
+easytree runs on your Mac and has no server; it never sends conversation text, file contents or tool output anywhere.
+
+**What it sees of the conversation.** It hooks four tools only: `Bash`, `EnterWorktree`, `ExitWorktree` and `Agent`. Every other tool call never reaches it. It passes each of these calls through unchanged and never blocks or rewrites one. From them it takes:
+
+- the Bash command's text, only to check whether it runs `git worktree add`;
+- the `worktreePath` field of an EnterWorktree or Agent result;
+- the description of the subagent that ran a `git worktree add`, as the label in `/trees`.
+
+The paths are used only as folders for the local commands below. Nothing it takes from a tool call is passed to `gh` or to the network.
+
+**Programs it runs**, each with a fixed name and fixed flags (Claude Code runs them with git hooks turned off):
+
+| Program | Why | Leaves your Mac? |
+| --- | --- | --- |
+| `git rev-parse`, `git worktree list`, `git status --porcelain`, `git for-each-ref`, `git remote` | Find which worktree a folder belongs to, list the repository's worktrees, count changed files, sort by recent commits, pick the remote. | No |
+| `git fetch <remote> pull/<n>/head` | `/tree-pr` only: download PR `<n>` from your repository's own remote (usually `origin` on GitHub), with your git credentials. Downloads only; it never pushes. | Yes: a fetch from your remote |
+| `git worktree add <repo>-worktrees/pr-<n> pr-<n>` and `git merge --ff-only FETCH_HEAD` | `/tree-pr` only: create the PR's worktree, or fast-forward a clean one to the PR's latest commit. | No |
+| `gh pr view <n> --json title` | `/tree-pr` only, and only if the GitHub CLI is installed: read the PR's title from GitHub, as your `gh` login. It sends the repository and the PR number. | Yes: a GitHub API read |
+| `/usr/bin/open -b <app id> <folder>` | Hand the folder to IntelliJ IDEA (`com.jetbrains.intellij`, else `.ce`) or VS Code (`com.microsoft.VSCode`, else Insiders). | No |
+
+**Files.** It reads and writes no files itself. It only checks whether your launch folder exists inside a worktree. The only things created on disk are the PR worktrees and the `pr-<n>` branches that `git` makes for `/tree-pr`.
+
+**What it stores.** Worktree paths, branch names, subagent task descriptions, PR titles and your launch folder, kept in Claude Code's own local storage for the plugin, per session.
 
 ## Settings
 
@@ -78,7 +97,7 @@ Run `/config` and find easytree, or set them in `settings.json` under `pluginCon
 
 - IDEs are launched through their macOS app ids, so Toolbox installs and IntelliJ IDEA Community Edition (`com.jetbrains.intellij.ce`), and VS Code Insiders, work without the `idea` or `code` shell commands.
 - IntelliJ asks whether to trust each new project folder. To skip that, add your repositories' parent folder under *Settings → Build, Execution, Deployment → Trusted Locations*.
-- `/tree-pr` works with GitHub pull requests (`pull/<n>/head`) and fetches from `origin`, or from the only remote. When the [GitHub CLI](https://cli.github.com) is installed and signed in, it also shows the PR's title. It adds `/.claude/worktrees/` to the repository's `.git/info/exclude`, so the checkouts never show as untracked files.
+- `/tree-pr` works with GitHub pull requests (`pull/<n>/head`) and fetches from `origin`, or from the only remote. When the [GitHub CLI](https://cli.github.com) is installed and signed in, it also shows the PR's title. Its checkouts live beside the repository, not inside it, so they never show up as untracked files.
 - Requires a recent Claude Code (the plugin is a hooks module, an early-access API).
 
 ## Develop

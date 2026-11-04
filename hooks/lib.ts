@@ -7,12 +7,6 @@ export const IDE_NAMES: Record<Ide, string> = {
   code: 'VS Code',
 }
 
-/** macOS bundle ids per IDE, tried in order (Ultimate before Community, stable before Insiders). */
-export const IDE_BUNDLES: Record<Ide, readonly string[]> = {
-  idea: ['com.jetbrains.intellij', 'com.jetbrains.intellij.ce'],
-  code: ['com.microsoft.VSCode', 'com.microsoft.VSCodeInsiders'],
-}
-
 const IDE_ALIASES: Record<string, Ide> = {
   idea: 'idea',
   intellij: 'idea',

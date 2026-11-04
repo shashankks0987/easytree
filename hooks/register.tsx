@@ -3,7 +3,6 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { PickerItem, PickerSection, Tree, TreeSource } from '../types'
 import {
-  IDE_BUNDLES,
   IDE_NAMES,
   type GitWorktree,
   type Ide,
@@ -43,7 +42,8 @@ const SECTION_TITLES: Record<PickerSection, string> = {
 }
 
 const TOOL = 'open_in_ide'
-const PR_DIR = '.claude/worktrees'
+const GIT_TIMEOUT = 15_000
+const FETCH_TIMEOUT = 120_000
 const MAX_STORED_SESSIONS = 50
 
 let statusTimer: { cancel: () => void } | undefined
@@ -360,7 +360,8 @@ async function buildPickerItems($: Engine): Promise<PickerItem[]> {
 
 /** Each local branch's last commit time (unix seconds), to put recent worktrees first. */
 async function branchRecency($: Engine, repo: string): Promise<Map<string, number>> {
-  const r = await git($, ['for-each-ref', '--format=%(committerdate:unix) %(refname:short)', 'refs/heads'], repo).catch(() => undefined)
+  const r = await $.process.run(['git', 'for-each-ref', '--format=%(committerdate:unix) %(refname:short)', 'refs/heads'], { cwd: repo, timeoutMs: GIT_TIMEOUT })
+    .catch(() => undefined)
   const out = new Map<string, number>()
   for (const line of r?.exitCode === 0 ? r.stdout.split('\n') : []) {
     const at = line.indexOf(' ')
@@ -386,25 +387,25 @@ async function checkoutPr($: Engine, pr: number, ide: Ide): Promise<string> {
 
   if (existing) {
     // Bring the worktree up to the PR's head when that is a fast-forward.
-    const fetched = await git($, ['fetch', remote, `pull/${pr}/head`], existing.path, 120_000)
+    const fetched = await $.process.run(['git', 'fetch', remote, `pull/${pr}/head`], { cwd: existing.path, timeoutMs: FETCH_TIMEOUT })
     if (fetched.exitCode !== 0) {
       note = ` Could not fetch the latest: ${firstLine(fetched.stderr)}`
     } else if ((await changedFiles($, existing.path)) > 0) {
       note = ' It has local changes, so it was left as it is.'
     } else {
-      const ff = await git($, ['merge', '--ff-only', 'FETCH_HEAD'], existing.path)
+      const ff = await $.process.run(['git', 'merge', '--ff-only', 'FETCH_HEAD'], { cwd: existing.path, timeoutMs: GIT_TIMEOUT })
       note = ff.exitCode === 0 ? ' Updated to the PR head.' : ' It has diverged from the PR head, so it was left as it is.'
     }
     await track($, existing.path, 'pr', label)
     return `PR ${label} is already checked out.${note}\n${await openTree($, ide, existing.path)}`
   }
 
-  const dest = `${main.path}/${PR_DIR}/${branch}`
-  const fetched = await git($, ['fetch', remote, `+pull/${pr}/head:${branch}`], main.path, 120_000)
+  // Beside the repository, not inside it: the checkout never shows as untracked files.
+  const dest = `${main.path}-worktrees/${branch}`
+  const fetched = await $.process.run(['git', 'fetch', remote, `+pull/${pr}/head:${branch}`], { cwd: main.path, timeoutMs: FETCH_TIMEOUT })
   if (fetched.exitCode !== 0) return `Could not fetch PR #${pr} from ${remote}: ${firstLine(fetched.stderr)}`
-  const added = await git($, ['worktree', 'add', dest, branch], main.path, 120_000)
+  const added = await $.process.run(['git', 'worktree', 'add', dest, branch], { cwd: main.path, timeoutMs: FETCH_TIMEOUT })
   if (added.exitCode !== 0) return `Could not create the worktree: ${firstLine(added.stderr)}`
-  await safe($, () => excludeLocally($, main.path, `/${PR_DIR}/`))
   await track($, dest, 'pr', label)
   return `Checked out PR ${label} into ${tildify(dest, home)} (branch ${branch}).\n${await openTree($, ide, dest)}`
 }
@@ -477,7 +478,8 @@ async function loadLaunchPrefix($: Engine): Promise<string> {
   const key = `launch:${await $.session.id()}`
   const stored = await $.store.get(key)
   if (typeof stored === 'string') return stored
-  const r = await git($, ['rev-parse', '--show-prefix'], await $.session.cwd()).catch(() => undefined)
+  const cwd = await $.session.cwd()
+  const r = await $.process.run(['git', 'rev-parse', '--show-prefix'], { cwd, timeoutMs: GIT_TIMEOUT }).catch(() => undefined)
   const prefix = r?.exitCode === 0 ? r.stdout.trim().replace(/\/+$/, '') : ''
   await $.store.set(key, prefix)
   await pruneStore($, 'launch:')
@@ -492,10 +494,6 @@ async function restore($: Engine): Promise<void> {
 
 // --- git and the IDEs ---
 
-async function git($: Engine, args: string[], cwd: string, timeoutMs = 15_000) {
-  return $.process.run(['git', ...args], { cwd, timeoutMs })
-}
-
 async function gitRoot($: Engine, dir: string): Promise<string | undefined> {
   return (await worktreeAt($, dir))?.root
 }
@@ -505,11 +503,11 @@ async function worktreeAt(
   $: Engine,
   dir: string,
 ): Promise<{ root: string; isLinked: boolean; branch?: string } | undefined> {
-  const r = await git(
-    $,
-    ['rev-parse', '--path-format=absolute', '--show-toplevel', '--git-dir', '--git-common-dir', '--abbrev-ref', 'HEAD'],
-    dir,
-  ).catch(() => undefined)
+  const r = await $.process.run(['git', 'rev-parse', '--path-format=absolute', '--show-toplevel', '--git-dir', '--git-common-dir', '--abbrev-ref', 'HEAD'], {
+      cwd: dir,
+      timeoutMs: GIT_TIMEOUT,
+    })
+    .catch(() => undefined)
   if (!r || r.exitCode !== 0) return undefined
   const [root, gitDir, commonDir, head] = r.stdout.trim().split('\n')
   if (!root) return undefined
@@ -517,36 +515,26 @@ async function worktreeAt(
 }
 
 async function listWorktrees($: Engine, dir: string): Promise<GitWorktree[]> {
-  const r = await git($, ['worktree', 'list', '--porcelain'], dir)
+  const r = await $.process.run(['git', 'worktree', 'list', '--porcelain'], { cwd: dir, timeoutMs: GIT_TIMEOUT })
   return r.exitCode === 0 ? parseWorktreeList(r.stdout) : []
 }
 
 async function changedFiles($: Engine, dir: string): Promise<number> {
-  const r = await git($, ['status', '--porcelain'], dir).catch(() => undefined)
+  const r = await $.process.run(['git', 'status', '--porcelain'], { cwd: dir, timeoutMs: GIT_TIMEOUT }).catch(() => undefined)
   return r?.exitCode === 0 ? r.stdout.split('\n').filter(Boolean).length : 0
 }
 
 async function pickRemote($: Engine, dir: string): Promise<string | undefined> {
-  const r = await git($, ['remote'], dir)
+  const r = await $.process.run(['git', 'remote'], { cwd: dir, timeoutMs: GIT_TIMEOUT })
   const remotes = r.exitCode === 0 ? r.stdout.split('\n').filter(Boolean) : []
   return remotes.includes('origin') ? 'origin' : remotes[0]
 }
 
 /** The PR's title through `gh` when it is installed and signed in; undefined otherwise. */
 async function prTitle($: Engine, dir: string, pr: number): Promise<string | undefined> {
-  const argv = ['gh', 'pr', 'view', String(pr), '--json', 'title', '--jq', '.title']
-  const r = await $.process.run(argv, { cwd: dir, timeoutMs: 10_000 }).catch(() => undefined)
+  const r = await $.process.run(['gh', 'pr', 'view', String(pr), '--json', 'title', '--jq', '.title'], { cwd: dir, timeoutMs: 10_000 })
+    .catch(() => undefined)
   return r?.exitCode === 0 ? r.stdout.trim() || undefined : undefined
-}
-
-/** Adds a pattern to the repo's .git/info/exclude, so PR worktrees never show as untracked. */
-async function excludeLocally($: Engine, repo: string, pattern: string): Promise<void> {
-  const r = await git($, ['rev-parse', '--path-format=absolute', '--git-common-dir'], repo)
-  if (r.exitCode !== 0) return
-  const file = `${r.stdout.trim()}/info/exclude`
-  const text = await $.fs.read(file).catch(() => '')
-  if (text.split('\n').includes(pattern)) return
-  await $.fs.write(file, `${text}${text && !text.endsWith('\n') ? '\n' : ''}${pattern}\n`)
 }
 
 /** Opens a worktree at the folder the session was launched in, when the worktree has it; else at its root. */
@@ -560,13 +548,24 @@ async function openTree($: Engine, ide: Ide, root: string): Promise<string> {
 /** Opens `path` in the IDE through its macOS bundle id; answers what happened, for the person. */
 async function openIn($: Engine, ide: Ide, path: string): Promise<string> {
   const home = await $.env.get('HOME')
-  let lastError = ''
-  for (const bundle of IDE_BUNDLES[ide]) {
-    const r = await $.process.run(['/usr/bin/open', '-b', bundle, path]).catch(() => undefined)
-    if (r?.exitCode === 0) return `Opened ${tildify(path, home)} in ${IDE_NAMES[ide]}.`
-    lastError = firstLine(r?.stderr ?? '')
-  }
-  return `Could not open ${IDE_NAMES[ide]} (${lastError || 'not installed?'}). Path: ${tildify(path, home)}`
+  const launched = ide === 'idea' ? await launchIdea($, path) : await launchVsCode($, path)
+  if (launched?.exitCode === 0) return `Opened ${tildify(path, home)} in ${IDE_NAMES[ide]}.`
+  const why = firstLine(launched?.stderr ?? '') || 'not installed?'
+  return `Could not open ${IDE_NAMES[ide]} (${why}). Path: ${tildify(path, home)}`
+}
+
+/** IntelliJ IDEA Ultimate, else Community Edition. */
+async function launchIdea($: Engine, path: string) {
+  const ultimate = await $.process.run(['/usr/bin/open', '-b', 'com.jetbrains.intellij', path]).catch(() => undefined)
+  if (ultimate?.exitCode === 0) return ultimate
+  return $.process.run(['/usr/bin/open', '-b', 'com.jetbrains.intellij.ce', path]).catch(() => undefined)
+}
+
+/** VS Code, else VS Code Insiders. */
+async function launchVsCode($: Engine, path: string) {
+  const stable = await $.process.run(['/usr/bin/open', '-b', 'com.microsoft.VSCode', path]).catch(() => undefined)
+  if (stable?.exitCode === 0) return stable
+  return $.process.run(['/usr/bin/open', '-b', 'com.microsoft.VSCodeInsiders', path]).catch(() => undefined)
 }
 
 async function agentLabel($: Engine, agentId: string): Promise<string | undefined> {
