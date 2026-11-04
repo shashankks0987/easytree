@@ -70,6 +70,8 @@ easytree runs on your Mac and has no server; it never sends conversation text, f
 
 The paths are used only as folders for the local commands below. Nothing it takes from a tool call is passed to `gh` or to the network.
 
+**The one tool it answers itself.** easytree adds one tool of its own, `open_in_ide` (listed as `mcp__easytree__open_in_ide`), which Claude calls when you ask it to open something in your IDE. Its hook answers that tool's calls itself, since there is no other tool behind it: it opens the given folder (or the current worktree at your launch folder) with `/usr/bin/open` and returns a line saying what it opened. easytree stands in for no other tool. Its hooks on `Bash`, `EnterWorktree`, `ExitWorktree` and `Agent` always let the real tool run and return its result unchanged.
+
 **Programs it runs**, each with a fixed name and fixed flags (Claude Code runs them with git hooks turned off):
 
 | Program | Why | Leaves your Mac? |
