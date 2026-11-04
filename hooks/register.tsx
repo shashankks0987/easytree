@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { Tree, TreeSource } from '../types'
+import type { PickerItem, PickerSection, Tree, TreeSource } from '../types'
 import {
   IDE_BUNDLES,
   IDE_NAMES,
@@ -9,8 +9,12 @@ import {
   type Ide,
   addsWorktree,
   basename,
-  columns,
+  branchFact,
   describeSource,
+  filterItems,
+  formatAll,
+  formatListing,
+  isAgentWorktree,
   matchTarget,
   parseIde,
   parsePrRef,
@@ -18,6 +22,7 @@ import {
   splitArgs,
   tildify,
   upsertTree,
+  whereIs,
 } from './lib'
 
 type $ = EngineInterface
@@ -25,6 +30,17 @@ type $ = EngineInterface
 // Change the tag when Tree's fields change: it declines what an earlier
 // version stored, which outlives a reload.
 const trees = atom({ plugin: 'easytree', key: 'trees' } as const, [], { shape: 'trees-1' })
+
+// The /trees picker: its rows as it opened, the search text, and the IDE a pick opens in.
+const PANE = 'trees'
+const pickerItems = atom({ plugin: 'easytree', key: 'pickerItems' } as const, [], { shape: 'picker-1' })
+const pickerQuery = atom({ plugin: 'easytree', key: 'pickerQuery' } as const, '')
+const pickerIde = atom({ plugin: 'easytree', key: 'pickerIde' } as const, '')
+const SECTION_TITLES: Record<PickerSection, string> = {
+  session: 'This session',
+  repo: 'This repository',
+  agents: 'Subagent worktrees',
+}
 
 const TOOL = 'open_in_ide'
 const PR_DIR = '.claude/worktrees'
@@ -47,6 +63,7 @@ export const register: Register = (on, options) => {
     await $.command.register({
       name: 'trees',
       description: 'List the git worktrees this session and its subagents work in',
+      argumentHint: '[all]',
       immediate: true,
     })
     await $.command.register({
@@ -138,9 +155,73 @@ export const register: Register = (on, options) => {
     return { result: await openTree($, ide, (await gitRoot($, cwd)) ?? cwd) }
   }).catch(() => ({ result: 'easytree could not open the IDE; try /tree-open.' }))
 
-  on('command.run', { command: 'trees' }, async $ => {
-    return { text: await listText($) }
+  on('command.run', { command: 'trees' }, async ($, e) => {
+    if (/^(--)?all$/i.test(e.args.trim())) return { text: await listText($, true) }
+    return { text: (await openPicker($)) ?? (await listText($)) }
   })
+
+  on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
+    const elements = $.ui.resolve(e)
+    const { Box, Text, Button } = elements
+    // Mobile draws no text field: the list shows unfiltered there.
+    const Input = 'Input' in elements ? elements.Input : undefined
+    const items = await read($, pickerItems)
+    const query = await read($, pickerQuery)
+    const ide = parseIde(await read($, pickerIde)) ?? defaultIde
+    const shown = filterItems(items, query)
+    const pick = (path: string) => async () => {
+      const text = await openTree($, ide, path)
+      await $.ui.close({ id: PANE })
+      $.ui.toast(text)
+    }
+    const groups = (['session', 'repo', 'agents'] as const)
+      .map(section => ({ section, rows: shown.filter(item => item.section === section) }))
+      .filter(group => group.rows.length > 0)
+
+    return (
+      <Box flexDirection="column">
+        {Input && (
+          <Input
+            key="search"
+            placeholder="Search by name, branch or PR…"
+            value={query}
+            autoFocus
+            submitLabel="open first"
+            onInput={(value: string) => void update($, pickerQuery, () => value)}
+            onSubmit={() => void (shown[0] && pick(shown[0].path)())}
+          />
+        )}
+        <Text dimColor>
+          {shown.length} of {items.length} · ↑↓ move · Enter opens · Esc closes
+        </Text>
+        {groups.map(group => (
+          <Box key={`section:${group.section}`} flexDirection="column" marginTop={1}>
+            <Text bold>
+              {SECTION_TITLES[group.section]} ({group.rows.length})
+            </Text>
+            {group.rows.map(item => (
+              <Button key={`tree:${item.path}`} plain onPress={pick(item.path)}>
+                {item.name} <Text dimColor>{item.facts}</Text>
+              </Button>
+            ))}
+          </Box>
+        ))}
+        {shown.length === 0 && <Text dimColor>No worktree matches "{query}".</Text>}
+        <Box marginTop={1}>
+          <Button key="ide" onPress={() => void update($, pickerIde, () => (ide === 'idea' ? 'code' : 'idea'))}>
+            {`Opens in ${IDE_NAMES[ide]} (press to switch)`}
+          </Button>
+        </Box>
+      </Box>
+    )
+  })
+
+  // Keep the row the focus moves to in view: the pane's body is a window over the list.
+  on('ui.focus', { component: 'Pane', requestId: PANE }, async ($, e, next) => {
+    const moved = await next(e)
+    if (e.element) await $.ui.scroll({ in: PANE, to: { key: e.element } }).catch(() => undefined)
+    return moved
+  }).catch(($, e, next) => next(e))
 
   on('command.run', { command: 'tree-open' }, async ($, e) => {
     const { ide = defaultIde, rest } = splitArgs(e.args)
@@ -168,9 +249,7 @@ export const register: Register = (on, options) => {
     const here = await worktreeAt($, cwd)
     if (here?.isLinked) return { text: await openTree($, ide, here.root) }
     if (live.length === 1) return { text: await openTree($, ide, live[0]!.path) }
-    if (live.length > 1) {
-      return { text: `${await listText($)}\n\nPick one: /tree-open <number> [idea|code]` }
-    }
+    if (live.length > 1) return { text: (await openPicker($)) ?? (await listText($)) }
     return { text: await openTree($, ide, here?.root ?? cwd) }
   })
 
@@ -182,46 +261,112 @@ export const register: Register = (on, options) => {
   })
 }
 
-async function listText($: $): Promise<string> {
+async function listText($: $, all = false): Promise<string> {
   const home = await $.env.get('HOME')
   const cwd = await $.session.cwd()
   const here = await worktreeAt($, cwd)
   const live = await liveTrees($)
-  const others = ((await safe($, () => listWorktrees($, cwd))) ?? []).filter(
-    w => !w.isBare && !live.some(t => t.path === w.path),
-  )
+  const repoTrees = ((await safe($, () => listWorktrees($, cwd))) ?? []).filter(w => !w.isBare)
+  const main = repoTrees.find(w => w.isMain)
+  const repo = main ? basename(main.path) : undefined
 
-  const lines: string[] = []
-  if (live.length === 0) {
-    lines.push('This session has not worked in any linked worktree yet.')
-  } else {
-    const rows = await Promise.all(
-      live.map(async (t, i) => {
-        const dirty = await changedFiles($, t.path)
-        const notes = [
-          t.path === here?.root ? 'session is here' : undefined,
-          describeSource(t),
-          dirty ? `${dirty} changed` : undefined,
-        ].filter(Boolean)
-        return [String(i + 1), basename(t.path), t.branch ?? '(detached)', tildify(t.path, home), notes.join(' · ')]
-      }),
-    )
-    lines.push('Worktrees of this session:', ...columns(rows).map(l => '  ' + l))
+  if (all) {
+    return formatAll({
+      repo,
+      all: repoTrees.map(w => ({
+        name: basename(w.path),
+        branch: w.branch,
+        isMain: w.isMain,
+        where: w.isMain ? tildify(w.path, home) : whereIs(w.path, main?.path, home),
+        mine: live.findIndex(t => t.path === w.path) + 1 || undefined,
+        isHere: w.path === here?.root,
+      })),
+    })
   }
-  if (others.length > 0) {
-    lines.push('', 'Other worktrees of this repository (open by name or branch):')
-    lines.push(
-      ...columns(
-        others.map(w => [
-          w.isMain ? `${basename(w.path)} (main)` : basename(w.path),
-          w.branch ?? '(detached)',
-          tildify(w.path, home),
-        ]),
-      ).map(l => '  ' + l),
-    )
+
+  const mine = await Promise.all(
+    live.map(async t => ({
+      name: basename(t.path),
+      branch: t.branch,
+      changed: await changedFiles($, t.path),
+      isHere: t.path === here?.root,
+      note: t.source === 'session' && t.path === here?.root ? '' : describeSource(t),
+    })),
+  )
+  const recency = main ? await branchRecency($, main.path) : new Map<string, number>()
+  const others = repoTrees
+    .filter(w => !live.some(t => t.path === w.path))
+    .sort((a, b) => Number(b.isMain) - Number(a.isMain) || (recency.get(b.branch ?? '') ?? 0) - (recency.get(a.branch ?? '') ?? 0))
+    .map(w => ({ name: basename(w.path), isMain: w.isMain, isAgent: isAgentWorktree(w.path) }))
+  return formatListing({ repo, mine, others, ideName: IDE_NAMES[defaultIde] })
+}
+
+/** Opens the /trees picker over a fresh listing; undefined when no surface can place it. */
+async function openPicker($: $): Promise<string | undefined> {
+  const items = await buildPickerItems($)
+  await update($, pickerItems, () => items)
+  await update($, pickerQuery, () => '')
+  await update($, pickerIde, () => defaultIde)
+  const opened = await $.ui.open({
+    id: PANE,
+    title: 'Worktrees',
+    focus: true,
+    closeOnEscape: true,
+    holdToasts: true,
+    rows: Math.min(items.length + 9, 30),
+  })
+  if (!opened.isPlaced) return undefined
+  return `Opened the worktree picker (${items.length} worktree${items.length === 1 ? '' : 's'}). Type to search, Enter to open.`
+}
+
+/** The picker's rows: this session's worktrees, then the repository's, then its subagents'. */
+async function buildPickerItems($: $): Promise<PickerItem[]> {
+  const cwd = await $.session.cwd()
+  const here = await worktreeAt($, cwd)
+  const live = await liveTrees($)
+  const repoTrees = ((await safe($, () => listWorktrees($, cwd))) ?? []).filter(w => !w.isBare)
+  const main = repoTrees.find(w => w.isMain)
+  const recency = main ? await branchRecency($, main.path) : new Map<string, number>()
+  const item = (path: string, section: PickerSection, facts: (string | undefined)[], branch?: string): PickerItem => {
+    const name = basename(path)
+    const text = facts.filter(Boolean).join(' · ')
+    return { path, name, section, facts: text, haystack: [name, branch, text, path].join(' ').toLowerCase() }
   }
-  lines.push('', `Open one: /tree-open [number|name] [idea|code]   (default: ${IDE_NAMES[defaultIde]})`)
-  return lines.join('\n')
+
+  const mine = await Promise.all(
+    live.map(async t => {
+      const changed = await changedFiles($, t.path)
+      const isHere = t.path === here?.root
+      return item(t.path, 'session', [
+        branchFact(basename(t.path), t.branch),
+        changed ? `${changed} changed` : 'clean',
+        isHere ? 'you are here' : undefined,
+        t.source === 'session' && isHere ? undefined : describeSource(t),
+      ], t.branch)
+    }),
+  )
+  const others = repoTrees
+    .filter(w => !live.some(t => t.path === w.path))
+    .sort((a, b) => Number(b.isMain) - Number(a.isMain) || (recency.get(b.branch ?? '') ?? 0) - (recency.get(a.branch ?? '') ?? 0))
+    .map(w =>
+      item(w.path, isAgentWorktree(w.path) && !w.isMain ? 'agents' : 'repo', [
+        w.isMain ? 'main checkout' : undefined,
+        branchFact(basename(w.path), w.branch),
+        w.path === here?.root ? 'you are here' : undefined,
+      ], w.branch),
+    )
+  return [...mine, ...others]
+}
+
+/** Each local branch's last commit time (unix seconds), to put recent worktrees first. */
+async function branchRecency($: $, repo: string): Promise<Map<string, number>> {
+  const r = await git($, ['for-each-ref', '--format=%(committerdate:unix) %(refname:short)', 'refs/heads'], repo).catch(() => undefined)
+  const out = new Map<string, number>()
+  for (const line of r?.exitCode === 0 ? r.stdout.split('\n') : []) {
+    const at = line.indexOf(' ')
+    if (at > 0) out.set(line.slice(at + 1), Number(line.slice(0, at)))
+  }
+  return out
 }
 
 async function checkoutPr($: $, pr: number, ide: Ide): Promise<string> {

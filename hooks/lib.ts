@@ -1,4 +1,4 @@
-import type { Tree, TreeSource } from '../types'
+import type { PickerItem, Tree, TreeSource } from '../types'
 
 export type Ide = 'idea' | 'code'
 
@@ -145,23 +145,126 @@ const SOURCE_TEXT: Record<TreeSource, string> = {
   enter: 'EnterWorktree',
   agent: 'subagent',
   bash: 'git worktree add',
-  pr: 'pull request',
+  pr: 'PR',
 }
 
 export function describeSource(tree: Tree): string {
-  return tree.label ? `${SOURCE_TEXT[tree.source]}: ${tree.label}` : SOURCE_TEXT[tree.source]
+  const text = SOURCE_TEXT[tree.source]
+  if (!tree.label) return text
+  return truncate(tree.source === 'pr' ? `${text} ${tree.label}` : `${text}: ${tree.label}`, 60)
 }
 
-/** Lays rows of cells out as left-aligned columns, two spaces apart. */
-export function columns(rows: readonly (readonly string[])[]): string[] {
-  const widths: number[] = []
-  for (const row of rows) row.forEach((cell, i) => (widths[i] = Math.max(widths[i] ?? 0, cell.length)))
-  return rows.map(row =>
-    row
-      .map((cell, i) => (i === row.length - 1 ? cell : cell.padEnd(widths[i]!)))
-      .join('  ')
-      .trimEnd(),
-  )
+export function truncate(text: string, max: number): string {
+  return text.length > max ? text.slice(0, max - 1).trimEnd() + '…' : text
+}
+
+/** Claude Code names its subagents' worktrees `agent-<id>`. */
+export function isAgentWorktree(path: string): boolean {
+  return /^agent-/.test(basename(path))
+}
+
+/** One of this session's worktrees, as /trees lists it. */
+export type ListedTree = {
+  name: string
+  branch?: string
+  changed: number
+  isHere: boolean
+  note: string
+}
+
+/** A worktree of the repository outside this session's list, most recent first. */
+export type OtherTree = { name: string; isMain: boolean; isAgent: boolean }
+
+/** How many of the repository's other worktrees /trees names before summing up the rest. */
+export const OTHERS_NAMED = 3
+
+/** The branch, when it says more than the folder's name does; `detached` when there is none. */
+export function branchFact(name: string, branch: string | undefined): string | undefined {
+  if (!branch) return 'detached'
+  return branch === name ? undefined : branch
+}
+
+/** The /trees listing as compact markdown: one line a worktree, the rest of the repo summed up. */
+export function formatListing(input: {
+  repo?: string
+  mine: readonly ListedTree[]
+  others: readonly OtherTree[]
+  ideName: string
+}): string {
+  const { repo, mine, others, ideName } = input
+  const inRepo = repo ? ` · repo \`${repo}\`` : ''
+  const out: string[] = []
+
+  if (mine.length === 0) {
+    out.push(`**No worktrees in this session yet**${inRepo}`)
+  } else {
+    out.push(`**${mine.length} worktree${mine.length === 1 ? '' : 's'} in this session**${inRepo}`, '')
+    mine.forEach((t, i) => {
+      const facts = [
+        branchFact(t.name, t.branch),
+        t.changed ? `${t.changed} changed` : 'clean',
+        t.isHere ? '**you are here**' : undefined,
+        t.note,
+      ].filter(Boolean)
+      out.push(`${i + 1}. \`${t.name}\` · ${facts.join(' · ')}`)
+    })
+  }
+
+  const agents = others.filter(o => o.isAgent && !o.isMain)
+  const rest = others.filter(o => !o.isAgent || o.isMain)
+  if (others.length > 0) {
+    const parts = rest.slice(0, OTHERS_NAMED).map(o => (o.isMain ? `\`${o.name}\` (main)` : `\`${o.name}\``))
+    const more = rest.length - parts.length
+    if (more > 0) parts.push(`${more} more`)
+    if (agents.length > 0) parts.push(`${agents.length} subagent worktree${agents.length === 1 ? '' : 's'}`)
+    out.push('', `Also in this repo: ${joinList(parts)}. \`/trees all\` lists them.`)
+  }
+
+  out.push('', `Open one: \`/tree-open <number|name> [idea|code]\` (default: ${ideName})`)
+  return out.join('\n')
+}
+
+/** `/trees all`: every worktree of the repository, with where it is. */
+export function formatAll(input: {
+  repo?: string
+  all: readonly { name: string; branch?: string; isMain: boolean; where: string; mine?: number; isHere: boolean }[]
+}): string {
+  const { repo, all } = input
+  const out = [`**All ${all.length} worktree${all.length === 1 ? '' : 's'}${repo ? ` of repo \`${repo}\`` : ''}**`, '']
+  for (const w of all) {
+    const facts = [
+      w.isMain ? 'main checkout' : undefined,
+      branchFact(w.name, w.branch),
+      w.mine ? `session #${w.mine}` : undefined,
+      w.isHere ? '**you are here**' : undefined,
+      `\`${w.where}\``,
+    ].filter(Boolean)
+    out.push(`- \`${w.name}\` · ${facts.join(' · ')}`)
+  }
+  out.push('', 'Open one: `/tree-open <name> [idea|code]`')
+  return out.join('\n')
+}
+
+/** `a`, `a and b`, `a, b and c`. */
+export function joinList(parts: readonly string[]): string {
+  if (parts.length <= 1) return parts.join('')
+  return `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`
+}
+
+/** Where a worktree is, relative to the main checkout when it lies under it. */
+export function whereIs(path: string, mainRoot: string | undefined, home: string | undefined): string {
+  if (mainRoot && path !== mainRoot && path.startsWith(mainRoot + '/')) return path.slice(mainRoot.length + 1)
+  return tildify(path, home)
+}
+
+/**
+ * The picker rows the search box lets through: every whitespace-separated word
+ * of the query must appear in a row's text, in any order and case.
+ */
+export function filterItems(items: readonly PickerItem[], query: string): PickerItem[] {
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean)
+  if (words.length === 0) return [...items]
+  return items.filter(item => words.every(w => item.haystack.includes(w)))
 }
 
 /** Whether a shell command creates a git worktree. */

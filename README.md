@@ -28,10 +28,11 @@ claude plugin install easytree --marketplace shashankks0987/easytree
 
 | Command | What it does |
 | --- | --- |
-| `/tree-open` | Opens the worktree the session is in now, at the folder you launched Claude in (or the worktree's root, if that folder isn't in it). If the session is on the main checkout and has made exactly one worktree, opens that one; if it has made several, lists them so you can pick. |
-| `/tree-open 2` / `/tree-open feat-login` / `/tree-open ~/some/path` | Opens a worktree by its number in `/trees`, its folder name or its branch (again at your launch folder), or any folder as given. |
+| `/tree-open` | Opens the worktree the session is in now, at the folder you launched Claude in (or the worktree's root, if that folder isn't in it). If the session is on the main checkout and has made exactly one worktree, opens that one; if it has made several, opens the `/trees` picker. |
+| `/tree-open 2` / `/tree-open feat-login` / `/tree-open ~/some/path` | Opens a worktree by its number in this session's list, its folder name or its branch (again at your launch folder), or any folder as given. |
 | `/tree-open … code` / `/tree-open … idea` | Overrides the default IDE for this one call (`intellij`, `vscode` work too). |
-| `/trees` | Lists this session's worktrees: branch, path, how each came to be (EnterWorktree, subagent, `git worktree add`, PR), and how many files are changed. Also lists the repository's other worktrees. |
+| `/trees` | Opens a picker: type to search by name, branch or PR, ↑↓ to move, Enter to open, Esc to close. It lists this session's worktrees first (branch, changed files, where each came from), then the repository's, then subagents'. A button at the bottom switches between IntelliJ and VS Code. |
+| `/trees all` | Prints every worktree of the repository with its path. |
 | `/tree-pr 123` / `/tree-pr <PR URL>` | Fetches the pull request into branch `pr-123` and a worktree at `<repo>/.claude/worktrees/pr-123`, then opens it. Running it again brings a clean checkout up to date with the PR. |
 
 All three run right away, even while Claude is in the middle of a turn, and none of them costs a model call.
@@ -49,7 +50,7 @@ While the session is in a linked worktree, or has made some, the line under the 
 ## How it finds the worktrees
 
 - **The session's own:** a session started with `claude --worktree`, and every `EnterWorktree` call.
-- **Subagents':** the worktree path an isolated subagent reports when it finishes. Worktrees of subagents still running in the background aren't in the session's list yet, but `/trees` shows them under the repository's other worktrees, and `/tree-open <name>` opens them.
+- **Subagents':** the worktree path an isolated subagent reports when it finishes. Worktrees of subagents still running in the background aren't in the session's list yet, but the `/trees` picker shows them under subagent worktrees, and `/tree-open <name>` opens them.
 - **Shell:** any Bash `git worktree add`; the repository's worktrees are compared before and after the call.
 - **`/tree-pr`:** the PR checkouts it creates.
 
@@ -88,4 +89,6 @@ claude plugin test /path/to/easytree
 
 ## License
 
-[MIT](LICENSE)
+[Apache-2.0](LICENSE). Created by Shashank ([@shashankks0987](https://github.com/shashankks0987)).
+
+If you fork, copy or build on easytree, keep the [NOTICE](NOTICE) file with it, as the license requires, and credit the original project.

@@ -12,8 +12,27 @@ export type Tree = {
   addedAt: number
 }
 
+/** Which group of the /trees picker a worktree is listed under. */
+export type PickerSection = 'session' | 'repo' | 'agents'
+
+/** One row of the /trees picker. */
+export type PickerItem = {
+  path: string
+  name: string
+  section: PickerSection
+  /** What the row says after the name: branch, changes, where it came from. */
+  facts: string
+  /** Lowercased text the search box matches against. */
+  haystack: string
+}
+
 declare module 'claude-code' {
   interface PluginState {
-    easytree: { trees: Shaped<Tree[]> }
+    easytree: {
+      trees: Shaped<Tree[]>
+      pickerItems: Shaped<PickerItem[]>
+      pickerQuery: string
+      pickerIde: string
+    }
   }
 }

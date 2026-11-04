@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "description": "Open the code Claude is changing in a git worktree, or a PR checkout, in IntelliJ IDEA or VS Code, at the same folder you launched Claude in.",
   "author": {
-    "name": "shashankks0987",
+    "name": "Shashank (shashankks0987)",
     "url": "https://github.com/shashankks0987"
   },
   "homepage": "https://github.com/shashankks0987/easytree",
@@ -16,7 +16,7 @@
     "vscode",
     "pull-request"
   ],
-  "license": "MIT",
+  "license": "Apache-2.0",
   "types": "./types/index.d.ts",
   "userConfig": {
     "ide": {

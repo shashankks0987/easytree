@@ -2,6 +2,7 @@ import { expect, test } from 'claude-code/testing'
 
 import {
   addsWorktree,
+  formatListing,
   matchTarget,
   parsePrRef,
   parseWorktreeList,
@@ -90,4 +91,25 @@ test('spots git worktree add in a shell command', async () => {
 test('shortens paths under home', async () => {
   expect(tildify('/Users/me/app', '/Users/me')).toBe('~/app')
   expect(tildify('/Users/meow', '/Users/me')).toBe('/Users/meow')
+})
+
+test('keeps /trees short when the repo has many worktrees', async () => {
+  const others = [
+    { name: 'app', isMain: true, isAgent: false },
+    ...['spike', 'wip', 'old', 'older', 'oldest'].map(name => ({ name, isMain: false, isAgent: false })),
+    ...Array.from({ length: 21 }, (_, i) => ({ name: `agent-${i}`, isMain: false, isAgent: true })),
+  ]
+  const text = formatListing({
+    repo: 'app',
+    mine: [
+      { name: 'feat-login', branch: 'feat/login', changed: 3, isHere: true, note: '' },
+      { name: 'pr-42', branch: 'pr-42', changed: 0, isHere: false, note: 'PR #42 Fix login' },
+    ],
+    others,
+    ideName: 'IntelliJ IDEA',
+  })
+  expect(text.split('\n').length).toBeLessThan(10)
+  expect(text).toContain('1. `feat-login` · feat/login · 3 changed · **you are here**')
+  expect(text).toContain('2. `pr-42` · clean · PR #42 Fix login')
+  expect(text).toContain('Also in this repo: `app` (main), `spike`, `wip`, 3 more and 21 subagent worktrees.')
 })
