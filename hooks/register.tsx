@@ -25,7 +25,7 @@ import {
   whereIs,
 } from './lib'
 
-type $ = EngineInterface
+type Engine = EngineInterface
 
 // Change the tag when Tree's fields change: it declines what an earlier
 // version stored, which outlives a reload.
@@ -261,7 +261,7 @@ export const register: Register = (on, options) => {
   })
 }
 
-async function listText($: $, all = false): Promise<string> {
+async function listText($: Engine, all = false): Promise<string> {
   const home = await $.env.get('HOME')
   const cwd = await $.session.cwd()
   const here = await worktreeAt($, cwd)
@@ -302,7 +302,7 @@ async function listText($: $, all = false): Promise<string> {
 }
 
 /** Opens the /trees picker over a fresh listing; undefined when no surface can place it. */
-async function openPicker($: $): Promise<string | undefined> {
+async function openPicker($: Engine): Promise<string | undefined> {
   const items = await buildPickerItems($)
   await update($, pickerItems, () => items)
   await update($, pickerQuery, () => '')
@@ -320,7 +320,7 @@ async function openPicker($: $): Promise<string | undefined> {
 }
 
 /** The picker's rows: this session's worktrees, then the repository's, then its subagents'. */
-async function buildPickerItems($: $): Promise<PickerItem[]> {
+async function buildPickerItems($: Engine): Promise<PickerItem[]> {
   const cwd = await $.session.cwd()
   const here = await worktreeAt($, cwd)
   const live = await liveTrees($)
@@ -359,7 +359,7 @@ async function buildPickerItems($: $): Promise<PickerItem[]> {
 }
 
 /** Each local branch's last commit time (unix seconds), to put recent worktrees first. */
-async function branchRecency($: $, repo: string): Promise<Map<string, number>> {
+async function branchRecency($: Engine, repo: string): Promise<Map<string, number>> {
   const r = await git($, ['for-each-ref', '--format=%(committerdate:unix) %(refname:short)', 'refs/heads'], repo).catch(() => undefined)
   const out = new Map<string, number>()
   for (const line of r?.exitCode === 0 ? r.stdout.split('\n') : []) {
@@ -369,7 +369,7 @@ async function branchRecency($: $, repo: string): Promise<Map<string, number>> {
   return out
 }
 
-async function checkoutPr($: $, pr: number, ide: Ide): Promise<string> {
+async function checkoutPr($: Engine, pr: number, ide: Ide): Promise<string> {
   const home = await $.env.get('HOME')
   const cwd = await $.session.cwd()
   const all = await safe($, () => listWorktrees($, cwd))
@@ -410,7 +410,7 @@ async function checkoutPr($: $, pr: number, ide: Ide): Promise<string> {
 }
 
 /** Records `dir`'s worktree when it is a linked one (not the main checkout). */
-async function track($: $, dir: string, source: TreeSource, label?: string): Promise<void> {
+async function track($: Engine, dir: string, source: TreeSource, label?: string): Promise<void> {
   const at = await worktreeAt($, dir)
   if (!at?.isLinked) return
   const tree: Tree = { path: at.root, branch: at.branch, source, label, addedAt: Date.now() }
@@ -420,7 +420,7 @@ async function track($: $, dir: string, source: TreeSource, label?: string): Pro
 }
 
 /** The tracked trees still on disk, their branches refreshed; the rest are dropped. */
-async function liveTrees($: $): Promise<Tree[]> {
+async function liveTrees($: Engine): Promise<Tree[]> {
   const list = await read($, trees)
   const checked = await Promise.all(list.map(async t => ({ t, at: await worktreeAt($, t.path) })))
   const live = checked
@@ -434,12 +434,12 @@ async function liveTrees($: $): Promise<Tree[]> {
 }
 
 /** Coalesces status refreshes; a timer reads the main session's directory, not a subagent's. */
-function scheduleStatus($: $): void {
+function scheduleStatus($: Engine): void {
   statusTimer?.cancel()
   statusTimer = $.clock.after(150, () => void safe($, () => refreshStatus($)))
 }
 
-async function refreshStatus($: $): Promise<void> {
+async function refreshStatus($: Engine): Promise<void> {
   if (!showStatus) return $.ui.status(undefined)
   const here = await worktreeAt($, await $.session.cwd())
   const others = (await liveTrees($)).filter(t => t.path !== here?.root).length
@@ -454,17 +454,17 @@ async function refreshStatus($: $): Promise<void> {
 
 // --- Persistence: $.state is the session's; $.store keeps it for --resume ---
 
-async function storeKey($: $): Promise<string> {
+async function storeKey($: Engine): Promise<string> {
   return `session:${await $.session.id()}`
 }
 
-async function persist($: $): Promise<void> {
+async function persist($: Engine): Promise<void> {
   await $.store.set(await storeKey($), await read($, trees))
   await pruneStore($, 'session:')
 }
 
 /** Keeps the newest MAX_STORED_SESSIONS keys under `prefix`. */
-async function pruneStore($: $, prefix: string): Promise<void> {
+async function pruneStore($: Engine, prefix: string): Promise<void> {
   const keys = (await $.store.keys()).filter(k => k.startsWith(prefix))
   for (const old of keys.slice(0, Math.max(0, keys.length - MAX_STORED_SESSIONS))) await $.store.delete(old)
 }
@@ -473,7 +473,7 @@ async function pruneStore($: $, prefix: string): Promise<void> {
  * The launch folder relative to its repository's root, read once per session
  * and kept: later the session may sit in a worktree, whose prefix is its own.
  */
-async function loadLaunchPrefix($: $): Promise<string> {
+async function loadLaunchPrefix($: Engine): Promise<string> {
   const key = `launch:${await $.session.id()}`
   const stored = await $.store.get(key)
   if (typeof stored === 'string') return stored
@@ -484,7 +484,7 @@ async function loadLaunchPrefix($: $): Promise<string> {
   return prefix
 }
 
-async function restore($: $): Promise<void> {
+async function restore($: Engine): Promise<void> {
   if ((await read($, trees)).length > 0) return
   const stored = await $.store.get(await storeKey($))
   if (Array.isArray(stored) && stored.length > 0) await update($, trees, () => stored as Tree[])
@@ -492,17 +492,17 @@ async function restore($: $): Promise<void> {
 
 // --- git and the IDEs ---
 
-async function git($: $, args: string[], cwd: string, timeoutMs = 15_000) {
+async function git($: Engine, args: string[], cwd: string, timeoutMs = 15_000) {
   return $.process.run(['git', ...args], { cwd, timeoutMs })
 }
 
-async function gitRoot($: $, dir: string): Promise<string | undefined> {
+async function gitRoot($: Engine, dir: string): Promise<string | undefined> {
   return (await worktreeAt($, dir))?.root
 }
 
 /** The worktree holding `dir`: its root, whether it is a linked worktree, and its branch. */
 async function worktreeAt(
-  $: $,
+  $: Engine,
   dir: string,
 ): Promise<{ root: string; isLinked: boolean; branch?: string } | undefined> {
   const r = await git(
@@ -516,32 +516,31 @@ async function worktreeAt(
   return { root, isLinked: gitDir !== commonDir, branch: head && head !== 'HEAD' ? head : undefined }
 }
 
-async function listWorktrees($: $, dir: string): Promise<GitWorktree[]> {
+async function listWorktrees($: Engine, dir: string): Promise<GitWorktree[]> {
   const r = await git($, ['worktree', 'list', '--porcelain'], dir)
   return r.exitCode === 0 ? parseWorktreeList(r.stdout) : []
 }
 
-async function changedFiles($: $, dir: string): Promise<number> {
+async function changedFiles($: Engine, dir: string): Promise<number> {
   const r = await git($, ['status', '--porcelain'], dir).catch(() => undefined)
   return r?.exitCode === 0 ? r.stdout.split('\n').filter(Boolean).length : 0
 }
 
-async function pickRemote($: $, dir: string): Promise<string | undefined> {
+async function pickRemote($: Engine, dir: string): Promise<string | undefined> {
   const r = await git($, ['remote'], dir)
   const remotes = r.exitCode === 0 ? r.stdout.split('\n').filter(Boolean) : []
   return remotes.includes('origin') ? 'origin' : remotes[0]
 }
 
 /** The PR's title through `gh` when it is installed and signed in; undefined otherwise. */
-async function prTitle($: $, dir: string, pr: number): Promise<string | undefined> {
-  const r = await $.process
-    .run(['gh', 'pr', 'view', String(pr), '--json', 'title', '--jq', '.title'], { cwd: dir, timeoutMs: 10_000 })
-    .catch(() => undefined)
+async function prTitle($: Engine, dir: string, pr: number): Promise<string | undefined> {
+  const argv = ['gh', 'pr', 'view', String(pr), '--json', 'title', '--jq', '.title']
+  const r = await $.process.run(argv, { cwd: dir, timeoutMs: 10_000 }).catch(() => undefined)
   return r?.exitCode === 0 ? r.stdout.trim() || undefined : undefined
 }
 
 /** Adds a pattern to the repo's .git/info/exclude, so PR worktrees never show as untracked. */
-async function excludeLocally($: $, repo: string, pattern: string): Promise<void> {
+async function excludeLocally($: Engine, repo: string, pattern: string): Promise<void> {
   const r = await git($, ['rev-parse', '--path-format=absolute', '--git-common-dir'], repo)
   if (r.exitCode !== 0) return
   const file = `${r.stdout.trim()}/info/exclude`
@@ -551,7 +550,7 @@ async function excludeLocally($: $, repo: string, pattern: string): Promise<void
 }
 
 /** Opens a worktree at the folder the session was launched in, when the worktree has it; else at its root. */
-async function openTree($: $, ide: Ide, root: string): Promise<string> {
+async function openTree($: Engine, ide: Ide, root: string): Promise<string> {
   if (!launchPrefix) return openIn($, ide, root)
   const dir = `${root}/${launchPrefix}`
   const stat = await $.fs.stat(dir).catch(() => undefined)
@@ -559,7 +558,7 @@ async function openTree($: $, ide: Ide, root: string): Promise<string> {
 }
 
 /** Opens `path` in the IDE through its macOS bundle id; answers what happened, for the person. */
-async function openIn($: $, ide: Ide, path: string): Promise<string> {
+async function openIn($: Engine, ide: Ide, path: string): Promise<string> {
   const home = await $.env.get('HOME')
   let lastError = ''
   for (const bundle of IDE_BUNDLES[ide]) {
@@ -570,7 +569,7 @@ async function openIn($: $, ide: Ide, path: string): Promise<string> {
   return `Could not open ${IDE_NAMES[ide]} (${lastError || 'not installed?'}). Path: ${tildify(path, home)}`
 }
 
-async function agentLabel($: $, agentId: string): Promise<string | undefined> {
+async function agentLabel($: Engine, agentId: string): Promise<string | undefined> {
   const agents = await $.agent.list().catch(() => [])
   return agents.find(a => a.id === agentId)?.description
 }
@@ -587,7 +586,7 @@ function firstLine(text: string): string {
 }
 
 /** Runs bookkeeping that must never break the call it rides on. */
-async function safe<T>($: $, fn: () => Promise<T>): Promise<T | undefined> {
+async function safe<T>($: Engine, fn: () => Promise<T>): Promise<T | undefined> {
   try {
     return await fn()
   } catch (err) {
