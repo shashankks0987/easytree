@@ -2,13 +2,17 @@
 
 # easytree
 
-I often want to read a pull request's code in my IDE, or move around the code while Claude is changing it in a worktree. No IDE handles git worktrees well, and I never found a good way to do either.
+I often want to read a pull request's code in my IDE, or move around the code while Claude is changing it in a worktree. But my IDE sits on the main checkout and has no idea which worktree Claude, or each of its subagents, is working in. Finding the right folder and opening it by hand every time got old fast.
 
 easytree takes the simple route: it opens the worktree's code in your IDE, rooted at the same folder you launched your Claude session in. Start Claude in `~/code/app/services/api`, let it work in a worktree, run `/tree-open`, and IntelliJ or VS Code opens `services/api` inside that worktree. It's the same project you're used to, only with the worktree's code.
 
 That works for the worktree the session is in, the ones its subagents work in, and pull requests you check out with `/tree-pr`.
 
 Supports IntelliJ IDEA and VS Code, on macOS.
+
+### How it fits with your IDE's worktree support
+
+IntelliJ IDEA (2026.1 and later) has a Worktrees tab, and VS Code has several worktree extensions. They list worktrees and switch between them, but you have to know which one to pick. easytree adds what they can't know: which worktrees *this Claude session* and its subagents are using, and which folder you launched Claude from. It works fine alongside them; a worktree opened by easytree is an ordinary folder to the IDE.
 
 ## Install
 
