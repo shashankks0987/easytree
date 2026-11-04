@@ -1,3 +1,5 @@
+<img src="assets/icon.png" alt="" width="96" align="right">
+
 # easytree
 
 I often want to read a pull request's code in my IDE, or move around the code while Claude is changing it in a worktree. No IDE handles git worktrees well, and I never found a good way to do either.
