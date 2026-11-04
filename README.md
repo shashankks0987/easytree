@@ -82,7 +82,14 @@ The paths are used only as folders for the local commands below. Nothing it take
 | `gh pr view <n> --json title` | `/tree-pr` only, and only if the GitHub CLI is installed: read the PR's title from GitHub, as your `gh` login. It sends the repository and the PR number. | Yes: a GitHub API read |
 | `/usr/bin/open -b <app id> <folder>` | Hand the folder to IntelliJ IDEA (`com.jetbrains.intellij`, else `.ce`) or VS Code (`com.microsoft.VSCode`, else Insiders). | No |
 
-**Files.** It reads and writes no files itself. It only checks whether your launch folder exists inside a worktree. The only things created on disk are the PR worktrees and the `pr-<n>` branches that `git` makes for `/tree-pr`.
+**Local data it reads, and where it goes.** It reads the output of the `git` commands above, whether your launch folder exists inside a worktree, your `HOME` path (only to shorten paths to `~/...`), the session's working folder and id, and its own stored list (below). This goes to two places only:
+
+- **Your screen:** the `/trees` picker, the status line, and toasts.
+- **Your Claude conversation:** like every slash command, the text a command prints (for example the `/trees` listing or "Opened ... in IntelliJ IDEA") and what `open_in_ide` returns become part of the conversation, which Claude Code sends to Claude as usual. That text holds worktree names, branches, relative paths, changed-file counts, PR numbers and titles; never file contents.
+
+Nothing else leaves your Mac apart from the `git fetch` and `gh pr view` calls in the table.
+
+**Files.** It reads and writes no files itself. The only things created on disk are the PR worktrees and the `pr-<n>` branches that `git` makes for `/tree-pr`.
 
 **What it stores.** Worktree paths, branch names, subagent task descriptions, PR titles and your launch folder, kept in Claude Code's own local storage for the plugin, per session.
 
