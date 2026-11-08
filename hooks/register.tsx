@@ -269,6 +269,7 @@ async function listText($: Engine, all = false): Promise<string> {
   const repoTrees = ((await safe($, () => listWorktrees($, cwd))) ?? []).filter(w => !w.isBare)
   const main = repoTrees.find(w => w.isMain)
   const repo = main ? basename(main.path) : undefined
+  if (!main && live.length === 0) return notInRepo($)
 
   if (all) {
     return formatAll({
@@ -304,6 +305,8 @@ async function listText($: Engine, all = false): Promise<string> {
 /** Opens the /trees picker over a fresh listing; undefined when no surface can place it. */
 async function openPicker($: Engine): Promise<string | undefined> {
   const items = await buildPickerItems($)
+  // A repository always lists its main checkout: no rows means no repository.
+  if (items.length === 0) return notInRepo($)
   await update($, pickerItems, () => items)
   await update($, pickerQuery, () => '')
   await update($, pickerIde, () => defaultIde)
@@ -356,6 +359,12 @@ async function buildPickerItems($: Engine): Promise<PickerItem[]> {
       ], w.branch),
     )
   return [...mine, ...others]
+}
+
+async function notInRepo($: Engine): Promise<string> {
+  const home = await $.env.get('HOME')
+  const cwd = await $.session.cwd()
+  return `No worktrees to show: ${tildify(cwd, home)} is not in a git repository. Start Claude inside a repository, or open a folder with /tree-open <path>.`
 }
 
 /** Each local branch's last commit time (unix seconds), to put recent worktrees first. */
