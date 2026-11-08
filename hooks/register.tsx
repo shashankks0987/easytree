@@ -431,6 +431,7 @@ async function track($: Engine, dir: string, source: TreeSource, label?: string)
 
 /** The tracked trees still on disk, their branches refreshed; the rest are dropped. */
 async function liveTrees($: Engine): Promise<Tree[]> {
+  await trackHere($)
   const list = await read($, trees)
   const checked = await Promise.all(list.map(async t => ({ t, at: await worktreeAt($, t.path) })))
   const live = checked
@@ -441,6 +442,20 @@ async function liveTrees($: Engine): Promise<Tree[]> {
     await persist($)
   }
   return live
+}
+
+/**
+ * Records the worktree the session is in when the list lacks it: a /clear
+ * starts a fresh session without a session.start, so startup alone can miss
+ * it. Unlike track, it schedules no status refresh (which reads this list).
+ */
+async function trackHere($: Engine): Promise<void> {
+  const at = await worktreeAt($, await $.session.cwd())
+  if (!at?.isLinked) return
+  if ((await read($, trees)).some(t => t.path === at.root)) return
+  const tree: Tree = { path: at.root, branch: at.branch, source: 'session', addedAt: Date.now() }
+  await update($, trees, list => upsertTree(list, tree))
+  await persist($)
 }
 
 /** Coalesces status refreshes; a timer reads the main session's directory, not a subagent's. */

@@ -10,6 +10,8 @@ That works for the worktree the session is in, the ones its subagents work in, a
 
 Supports IntelliJ IDEA and VS Code, on macOS.
 
+![/trees opens a searchable picker of 51 worktrees; typing "auth" narrows it, and Enter opens refactor-auth-service/services/api in IntelliJ IDEA](assets/demo.gif)
+
 ### How it fits with your IDE's worktree support
 
 IntelliJ IDEA (2026.1 and later) has a Worktrees tab, and VS Code has several worktree extensions. They list worktrees and switch between them, but you have to know which one to pick. easytree adds what they can't know: which worktrees *this Claude session* and its subagents are using, and which folder you launched Claude from. It works fine alongside them; a worktree opened by easytree is an ordinary folder to the IDE.
