@@ -1,6 +1,6 @@
 {
   "name": "easytree",
-  "version": "0.3.5",
+  "version": "0.3.6",
   "description": "Open the code Claude is changing in a git worktree, or a PR checkout, in IntelliJ IDEA or VS Code, at the same folder you launched Claude in.",
   "icon": "./assets/icon.png",
   "author": {

@@ -18,6 +18,14 @@ IntelliJ IDEA (2026.1 and later) has a Worktrees tab, and VS Code has several wo
 
 ## Install
 
+**Requirements**
+
+- **macOS.**
+- **IntelliJ IDEA and/or VS Code, installed as apps.** That includes IntelliJ IDEA Ultimate or Community Edition (Toolbox installs too) and VS Code or VS Code Insiders. You don't need the `idea` or `code` shell commands on your PATH: easytree launches the apps through macOS.
+- **git 2.31 or later.** The git that comes with Xcode's command line tools is recent enough.
+- **A recent Claude Code.** easytree is a hooks-module plugin, an early-access plugin API; it's tested on Claude Code 2.1.317 and later. If it doesn't load, run `claude update`.
+- **Optional:** the [GitHub CLI](https://cli.github.com), signed in, so `/tree-pr` can show PR titles. `/tree-pr` itself needs a repository with a GitHub remote.
+
 At the prompt of a Claude Code session in a terminal:
 
 ```
@@ -110,10 +118,8 @@ Run `/config` and find easytree, or set them in `settings.json` under `pluginCon
 
 ## Notes
 
-- IDEs are launched through their macOS app ids, so Toolbox installs and IntelliJ IDEA Community Edition (`com.jetbrains.intellij.ce`), and VS Code Insiders, work without the `idea` or `code` shell commands.
 - IntelliJ asks whether to trust each new project folder. To skip that, add your repositories' parent folder under *Settings → Build, Execution, Deployment → Trusted Locations*.
 - `/tree-pr` works with GitHub pull requests (`pull/<n>/head`) and fetches from `origin`, or from the only remote. When the [GitHub CLI](https://cli.github.com) is installed and signed in, it also shows the PR's title. Its checkouts live beside the repository, not inside it, so they never show up as untracked files.
-- Requires a recent Claude Code (the plugin is a hooks module, an early-access API).
 
 ## Develop
 
